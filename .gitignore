@@ -1,0 +1,20 @@
+# Virtual Environment
+venv/
+**/venv/
+.venv/
+**/__pycache__/
+*.pyc
+
+# Model Weights
+*.pt
+
+# Video Outputs & Runs
+out/
+**/out/
+runs/
+**/runs/
+
+# IDE files
+.vscode/
+.idea/
+.DS_Store
