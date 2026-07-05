@@ -18,6 +18,7 @@ import threading
 import uuid
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.job_runner import run_job
@@ -26,6 +27,14 @@ from app.models import Metric
 from app import cache
 
 app = FastAPI(title="VoxelQ")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 jobs_status: dict = {}
 jobs_queues: dict = {}

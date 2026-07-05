@@ -1,0 +1,33 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap");
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background-color: #0b1220;
+  color: #e7ecf5;
+  font-family: "Inter", system-ui, sans-serif;
+}
+
+/* split-flap tile: a subtle vertical flip when the density band changes */
+@keyframes flip-in {
+  0% {
+    transform: rotateX(90deg);
+    opacity: 0;
+  }
+  100% {
+    transform: rotateX(0deg);
+    opacity: 1;
+  }
+}
+
+.flap-tile {
+  animation: flip-in 220ms ease-out;
+  transform-origin: top;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flap-tile {
+    animation: none;
+  }
+}
