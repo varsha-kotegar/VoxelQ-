@@ -1,15 +1,16 @@
 """
-Phase 4 — job runner
-Wraps the Phase 1-3 pipeline (detector + zone + arrival_filter + estimator)
-into a single function that runs in a background THREAD (not asyncio task —
-ultralytics inference is synchronous/blocking, so it needs a real OS thread
-so it doesn't block FastAPI's event loop).
+Phase 5 — job runner with write-through persistence
+Same pipeline as Phase 4, now also:
+  1. Creates/updates the VideoJob row (lifecycle: pending -> running -> completed/error)
+  2. Writes each Metric row to Postgres
+  3. Writes the latest snapshot to Redis
+  4. Still pushes to the in-memory queue for live WebSocket broadcast
 
-Communicates with the FastAPI layer via a thread-safe queue.Queue.
+Each background thread gets its OWN DB session (SQLAlchemy sessions are not
+thread-safe to share across threads).
 """
 
 import queue
-import time
 import traceback
 from datetime import datetime, timezone
 
@@ -19,6 +20,9 @@ from ultralytics import YOLO
 from app.zone import Zone
 from app.arrival_filter import ArrivalFilter
 from app.estimator import WaitTimeEstimator
+from app.db import get_session
+from app.models import VideoJob, Metric
+from app import cache
 
 PERSON_CLASS_ID = 0
 
@@ -37,15 +41,15 @@ def run_job(
     low_capacity: int = 5,
     high_capacity: int = 15,
 ):
-    """
-    Runs synchronously in a background thread. Pushes one metrics dict per
-    frame onto metrics_queue. Updates status_store[job_id] throughout so
-    GET /videos/{id}/status has something to report even without connecting
-    to the WebSocket.
-    """
     status_store[job_id] = {"state": "running", "error": None, "last_metrics": None}
+    db = get_session()
 
     try:
+        job_row = VideoJob(id=job_id, source=source, status="running",
+                            started_at=datetime.now(timezone.utc))
+        db.add(job_row)
+        db.commit()
+
         cap = cv2.VideoCapture(source)
         fps = cap.get(cv2.CAP_PROP_FPS) or 25
         cap.release()
@@ -85,14 +89,41 @@ def run_job(
                 "wait_time_seconds": metrics["wait_time_seconds"],
             }
 
+            # --- write-through: Redis (live) + Postgres (history) + queue (broadcast) ---
+            cache.set_snapshot(job_id, payload)
+
+            db.add(Metric(
+                job_id=job_id,
+                occupancy=payload["occupancy"],
+                avg_occupancy=payload["avg_occupancy"],
+                arrival_rate_per_min=payload["arrival_rate_per_min"],
+                wait_time_seconds=payload["wait_time_seconds"],
+                density_band=payload["density_band"],
+            ))
+            db.commit()
+
             metrics_queue.put(payload)
             status_store[job_id]["last_metrics"] = payload
+
+        job_row.status = "completed"
+        job_row.completed_at = datetime.now(timezone.utc)
+        db.commit()
 
         status_store[job_id]["state"] = "completed"
         metrics_queue.put({"event": "done"})
 
     except Exception as e:
+        db.rollback()
+        try:
+            job_row.status = "error"
+            job_row.error_message = str(e)
+            db.commit()
+        except Exception:
+            pass
         status_store[job_id]["state"] = "error"
         status_store[job_id]["error"] = str(e)
         metrics_queue.put({"event": "error", "message": str(e)})
         traceback.print_exc()
+
+    finally:
+        db.close()

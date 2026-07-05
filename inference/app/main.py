@@ -1,15 +1,18 @@
 """
-Phase 4 — VoxelQ FastAPI service
+Phase 5 — VoxelQ FastAPI service (with persistence)
 
 Run from inference/ (one level above app/):
     uvicorn app.main:app --reload --port 8000
 
 Endpoints:
-    POST /videos/start          -> {job_id}
-    GET  /videos/{job_id}/status -> current status + last metrics
-    WS   /videos/{job_id}/stream -> live metrics, one JSON message per frame
+    POST /videos/start              -> {job_id}
+    GET  /videos/{job_id}/status     -> live status (in-memory, fast)
+    GET  /videos/{job_id}/metrics    -> historical metrics from Postgres
+    WS   /videos/{job_id}/stream     -> sends cached snapshot immediately on
+                                         connect (Redis), then live updates
 """
 
+import asyncio
 import queue
 import threading
 import uuid
@@ -18,19 +21,24 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from app.job_runner import run_job
+from app.db import init_db, get_session
+from app.models import Metric
+from app import cache
 
 app = FastAPI(title="VoxelQ")
 
-# In-memory job state (fine for local/portfolio use; Phase 5 moves durable
-# history to Postgres — this stays as the *live* coordination layer, with
-# Redis taking over this role once we containerize in Phase 7).
 jobs_status: dict = {}
 jobs_queues: dict = {}
 
 
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
+
 class StartJobRequest(BaseModel):
-    source: str                      # path to video file
-    polygon: list                    # [[x1,y1],[x2,y2],...]
+    source: str
+    polygon: list
     imgsz: int = 640
     conf: float = 0.35
     iou: float = 0.5
@@ -76,12 +84,51 @@ def get_status(job_id: str):
     return jobs_status[job_id]
 
 
+@app.get("/videos/{job_id}/metrics")
+def get_metrics(job_id: str, limit: int = 500):
+    """Historical metrics from Postgres — works even after server restart,
+    as long as the job_id existed before."""
+    db = get_session()
+    try:
+        rows = (
+            db.query(Metric)
+            .filter(Metric.job_id == job_id)
+            .order_by(Metric.timestamp.asc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "timestamp": row.timestamp.isoformat(),
+                "occupancy": row.occupancy,
+                "avg_occupancy": row.avg_occupancy,
+                "arrival_rate_per_min": row.arrival_rate_per_min,
+                "wait_time_seconds": row.wait_time_seconds,
+                "density_band": row.density_band,
+            }
+            for row in rows
+        ]
+    finally:
+        db.close()
+
+
 @app.websocket("/videos/{job_id}/stream")
 async def stream_video(websocket: WebSocket, job_id: str):
     await websocket.accept()
 
-    if job_id not in jobs_queues:
-        await websocket.send_json({"event": "error", "message": "unknown job_id"})
+    # Send whatever we have cached immediately — client doesn't have to wait
+    # for the next live frame just to see current state.
+    snapshot = cache.get_snapshot(job_id)
+    if snapshot:
+        await websocket.send_json({"event": "snapshot", **snapshot})
+
+    status = jobs_status.get(job_id)
+    is_active = status and status.get("state") in ("pending", "running")
+
+    if job_id not in jobs_queues or not is_active:
+        # Job may be from a previous server run or already completed — no live queue,
+        # but we already sent the cached snapshot above if one existed.
+        await websocket.send_json({"event": "done", "note": "job not active; snapshot only"})
         await websocket.close()
         return
 
@@ -89,11 +136,9 @@ async def stream_video(websocket: WebSocket, job_id: str):
     try:
         while True:
             try:
-                # non-blocking poll of the thread-safe queue, so we don't
-                # block the asyncio event loop waiting on a sync queue.
                 payload = q.get_nowait()
             except queue.Empty:
-                await _sleep(0.05)
+                await asyncio.sleep(0.05)
                 continue
 
             await websocket.send_json(payload)
@@ -105,8 +150,3 @@ async def stream_video(websocket: WebSocket, job_id: str):
         pass
     finally:
         await websocket.close()
-
-
-async def _sleep(seconds: float):
-    import asyncio
-    await asyncio.sleep(seconds)
