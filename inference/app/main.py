@@ -32,6 +32,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
+        "https://voxel-q.vercel.app",
         "*",
     ],
     allow_credentials=True,
