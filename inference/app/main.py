@@ -17,7 +17,7 @@ import queue
 import threading
 import uuid
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -69,6 +69,14 @@ class StartJobRequest(BaseModel):
 
 @app.post("/videos/start")
 def start_video(req: StartJobRequest):
+    # Check if any job is currently running
+    for jid, info in jobs_status.items():
+        if info.get("state") == "running":
+            raise HTTPException(
+                status_code=400,
+                detail="A video processing job is already running. Parallel jobs are disabled to prevent memory overflow."
+            )
+
     job_id = str(uuid.uuid4())
     metrics_queue: "queue.Queue" = queue.Queue()
     jobs_queues[job_id] = metrics_queue

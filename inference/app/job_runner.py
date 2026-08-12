@@ -15,7 +15,6 @@ import traceback
 from datetime import datetime, timezone
 
 import cv2
-from ultralytics import YOLO
 
 from app.zone import Zone
 from app.arrival_filter import ArrivalFilter
@@ -23,6 +22,7 @@ from app.estimator import WaitTimeEstimator
 from app.db import get_session
 from app.models import VideoJob, Metric
 from app import cache
+from app.model_loader import get_shared_model
 
 PERSON_CLASS_ID = 0
 
@@ -54,7 +54,7 @@ def run_job(
         fps = cap.get(cv2.CAP_PROP_FPS) or 25
         cap.release()
 
-        model = YOLO("yolov8n.pt")
+        model = get_shared_model()
         zone = Zone(polygon_points)
         arrival_filter = ArrivalFilter(fps=fps, debounce_seconds=debounce_seconds)
         estimator = WaitTimeEstimator(window_seconds=window_seconds, fps=fps,

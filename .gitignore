@@ -18,3 +18,7 @@ runs/
 .vscode/
 .idea/
 .DS_Store
+
+# Phase Reports
+phase*report.md
+
