@@ -12,8 +12,7 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:voxelq@localhost:5432/voxelq",
 )
-# Managed Postgres providers (e.g. Render, Heroku) may supply postgres://,
-# which SQLAlchemy 2.0 rejects unless normalized to postgresql://.
+# Normalize postgres:// to postgresql:// for SQLAlchemy 2.0 compatibility.
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
