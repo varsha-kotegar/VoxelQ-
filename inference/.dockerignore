@@ -6,3 +6,4 @@ runs/
 out/
 yolov8n.pt
 *.mp4
+!sample_videos/*.mp4

@@ -12,6 +12,10 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL",
     "postgresql://postgres:voxelq@localhost:5432/voxelq",
 )
+# Managed Postgres providers (e.g. Render, Heroku) may supply postgres://,
+# which SQLAlchemy 2.0 rejects unless normalized to postgresql://.
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)

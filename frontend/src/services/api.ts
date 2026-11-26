@@ -1,6 +1,6 @@
 import type { JobStatus, Metric, StartJobRequest } from "../types/metrics";
 
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+const API_BASE = (import.meta.env.VITE_API_BASE ?? "http://localhost:8000").replace(/\/+$/, "");
 
 export async function startJob(req: StartJobRequest): Promise<{ job_id: string }> {
   const res = await fetch(`${API_BASE}/videos/start`, {

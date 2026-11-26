@@ -13,6 +13,7 @@ Endpoints:
 """
 
 import asyncio
+import os
 import queue
 import threading
 import uuid
@@ -28,13 +29,19 @@ from app import cache
 
 app = FastAPI(title="VoxelQ")
 
+_extra_origins = [
+    o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
         "https://voxel-q.vercel.app",
-        "*",
+        *_extra_origins,
     ],
+    allow_origin_regex=r"https://.*\.vercel\.app",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -176,4 +183,7 @@ async def stream_video(websocket: WebSocket, job_id: str):
     except WebSocketDisconnect:
         pass
     finally:
-        await websocket.close()
+        try:
+            await websocket.close()
+        except Exception:
+            pass
